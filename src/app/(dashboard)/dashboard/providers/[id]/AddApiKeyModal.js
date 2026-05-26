@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Button, Badge, Input, Modal, Select } from "@/shared/components";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
@@ -44,6 +44,20 @@ export default function AddApiKeyModal({ isOpen, provider, providerName, isCompa
   const [mode, setMode] = useState("single"); // "single" | "bulk"
   const [bulkText, setBulkText] = useState("");
   const [bulkResult, setBulkResult] = useState(null); // { success, failed }
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setFormData({ name: "", apiKey: "", defaultModel: "", priority: 1, proxyPoolId: NONE_PROXY_POOL_VALUE, ollamaHostUrl: "" });
+    setAzureData({ azureEndpoint: "", apiVersion: "2024-10-01-preview", deployment: "", organization: "" });
+    setCloudflareData({ accountId: "" });
+    setRegion(defaultRegion);
+    setValidating(false);
+    setValidationResult(null);
+    setSaving(false);
+    setMode("single");
+    setBulkText("");
+    setBulkResult(null);
+  }, [isOpen]);
 
   const buildProviderSpecificData = () => {
     if (isOllamaLocal && formData.ollamaHostUrl.trim()) {
