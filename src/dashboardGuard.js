@@ -50,6 +50,9 @@ const ALWAYS_PROTECTED = [
   "/api/oauth/minimax-code-global/lease",
 ];
 
+// Same bar as ALWAYS_PROTECTED for routes with an id segment (plaintext secret readers)
+const ALWAYS_PROTECTED_PATTERNS = [/^\/api\/providers\/[^/]+\/key\/?$/];
+
 // Require auth, but allow through if requireLogin is disabled
 const PROTECTED_API_PATHS = [
   "/api/settings",
@@ -219,7 +222,7 @@ export async function proxy(request) {
   }
 
   // Always protected - require valid JWT or local CLI token (machineId-based)
-  if (ALWAYS_PROTECTED.some((p) => pathname.startsWith(p))) {
+  if (ALWAYS_PROTECTED.some((p) => pathname.startsWith(p)) || ALWAYS_PROTECTED_PATTERNS.some((re) => re.test(pathname))) {
     if (await hasValidCliToken(request) || await hasValidToken(request))
       return NextResponse.next();
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
