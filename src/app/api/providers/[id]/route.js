@@ -69,14 +69,13 @@ export async function GET(request, { params }) {
       return NextResponse.json({ error: "Connection not found" }, { status: 404 });
     }
 
-    // Hide sensitive fields
-    const result = { ...connection };
-    delete result.apiKey;
-    delete result.accessToken;
-    delete result.refreshToken;
-    delete result.idToken;
+    // Hide sensitive fields, but include masked API key
+    const { apiKey, accessToken, refreshToken, idToken, ...rest } = connection;
+    const maskedApiKey = apiKey && apiKey.length >= 8
+      ? `${apiKey.slice(0, 4)}${"*".repeat(Math.min(apiKey.length - 8, 20))}${apiKey.slice(-4)}`
+      : apiKey ? "****" : null;
 
-    return NextResponse.json({ connection: result });
+    return NextResponse.json({ connection: { ...rest, maskedApiKey } });
   } catch (error) {
     console.log("Error fetching connection:", error);
     return NextResponse.json({ error: "Failed to fetch connection" }, { status: 500 });
