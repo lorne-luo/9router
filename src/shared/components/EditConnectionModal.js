@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import PropTypes from "prop-types";
 import Modal from "@/shared/components/Modal";
 import Input from "@/shared/components/Input";
 import Button from "@/shared/components/Button";
 import Badge from "@/shared/components/Badge";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
+import { cn } from "@/shared/utils/cn";
 
 export default function EditConnectionModal({ isOpen, connection, proxyPools, onSave, onClose }) {
   const [formData, setFormData] = useState({
@@ -26,6 +27,10 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [showFullKey, setShowFullKey] = useState(false);
+  const [fullKey, setFullKey] = useState(null);
+  const [fetchingKey, setFetchingKey] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (connection) {
@@ -48,6 +53,9 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       }
       setTestResult(null);
       setValidationResult(null);
+      setShowFullKey(false);
+      setFullKey(null);
+      setCopied(false);
     }
   }, [connection]);
 
@@ -96,6 +104,48 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
       setValidating(false);
     }
   };
+
+  const handleToggleKeyVisibility = useCallback(async () => {
+    if (showFullKey) {
+      setShowFullKey(false);
+      return;
+    }
+    if (fullKey) {
+      setShowFullKey(true);
+      return;
+    }
+    setFetchingKey(true);
+    try {
+      const res = await fetch(`/api/providers/${connection.id}/key`);
+      const data = await res.json();
+      if (data.apiKey) {
+        setFullKey(data.apiKey);
+        setShowFullKey(true);
+      }
+    } catch {
+      // silent
+    } finally {
+      setFetchingKey(false);
+    }
+  }, [showFullKey, fullKey, connection?.id]);
+
+  const handleCopyKey = useCallback(async () => {
+    try {
+      let keyToCopy = fullKey;
+      if (!keyToCopy) {
+        const res = await fetch(`/api/providers/${connection.id}/key`);
+        const data = await res.json();
+        keyToCopy = data.apiKey;
+        if (keyToCopy) setFullKey(keyToCopy);
+      }
+      if (!keyToCopy) return;
+      await navigator.clipboard.writeText(keyToCopy);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // silent
+    }
+  }, [fullKey, connection?.id]);
 
   const handleSubmit = async () => {
     if (!connection) return;
@@ -183,14 +233,45 @@ export default function EditConnectionModal({ isOpen, connection, proxyPools, on
 
         {!isOAuth && (
           <>
+            {connection.maskedApiKey && !formData.apiKey && (
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-text-main">Current API Key</label>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 py-2.5 px-3 text-sm text-text-main bg-surface-2 rounded-[10px] border border-transparent font-mono truncate select-all">
+                    {showFullKey ? (fullKey || "····") : (connection.maskedApiKey || "····")}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleToggleKeyVisibility}
+                    disabled={fetchingKey}
+                    className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-colors shrink-0"
+                    title={showFullKey ? "Hide" : "Show full key"}
+                  >
+                    <span className={cn("material-symbols-outlined text-[18px]", fetchingKey && "animate-spin")}>
+                      {fetchingKey ? "progress_activity" : showFullKey ? "visibility_off" : "visibility"}
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCopyKey}
+                    className="p-2 hover:bg-black/5 dark:hover:bg-white/5 rounded text-text-muted hover:text-primary transition-colors shrink-0"
+                    title="Copy"
+                  >
+                    <span className="material-symbols-outlined text-[18px]">
+                      {copied ? "check" : "content_copy"}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="flex gap-2">
               <Input
-                label="API Key"
+                label={connection.maskedApiKey ? "Replace API Key" : "API Key"}
                 type="password"
                 value={formData.apiKey}
                 onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
                 placeholder="Enter new API key"
-                hint="Leave blank to keep the current API key."
+                hint={connection.maskedApiKey ? "Leave blank to keep the current API key." : undefined}
                 className="flex-1"
               />
               <div className="pt-6">
@@ -275,6 +356,7 @@ EditConnectionModal.propTypes = {
     authType: PropTypes.string,
     provider: PropTypes.string,
     providerSpecificData: PropTypes.object,
+    maskedApiKey: PropTypes.string,
   }),
   proxyPools: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string,

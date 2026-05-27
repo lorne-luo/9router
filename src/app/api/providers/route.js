@@ -66,9 +66,13 @@ export async function GET() {
       const name = isCompatible
         ? (c.name || nodeNameMap[c.provider] || c.providerSpecificData?.nodeName || c.provider)
         : c.name;
+      const maskedApiKey = c.apiKey && c.apiKey.length >= 8
+        ? `${c.apiKey.slice(0, 4)}${"*".repeat(Math.min(c.apiKey.length - 8, 20))}${c.apiKey.slice(-4)}`
+        : c.apiKey ? "****" : null;
       return {
         ...c,
         name,
+        maskedApiKey,
         apiKey: undefined,
         accessToken: undefined,
         refreshToken: undefined,
