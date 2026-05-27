@@ -306,3 +306,31 @@ describe("dashboard guard helpers", () => {
     expect(__test__.extractApiKey(apiRequest)).toBe("header-key");
   });
 });
+
+describe("dashboard guard plaintext key route", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+    mocks.validateApiKey.mockResolvedValue(false);
+    mocks.getConsistentMachineId.mockResolvedValue("cli-token");
+    mocks.verifyDashboardAuthToken.mockResolvedValue(false);
+  });
+
+  it("requires auth for /api/providers/:id/key even when requireLogin=false", async () => {
+    const response = await proxy(localRequest("/api/providers/conn-1/key", {
+      host: "localhost:20128",
+      origin: "http://localhost:20128",
+    }));
+
+    expect(response.status).toBe(401);
+  });
+
+  it("still lets requireLogin=false open the masked provider list", async () => {
+    const response = await proxy(localRequest("/api/providers", {
+      host: "localhost:20128",
+      origin: "http://localhost:20128",
+    }));
+
+    expect(response).toBe(mocks.nextResponse);
+  });
+});
