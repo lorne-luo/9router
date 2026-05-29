@@ -10,6 +10,9 @@ import CooldownTimer from "./CooldownTimer";
 export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null, autoPing = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState(null); // null | "success" | "failed"
+  const [testError, setTestError] = useState(null);
   const proxyDropdownRef = useRef(null);
   const proxyBtnRef = useRef(null);
   const [proxyDropdownStyle, setProxyDropdownStyle] = useState(null);
@@ -112,6 +115,23 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
     } finally {
       setUpdatingProxy(false);
       setShowProxyDropdown(false);
+    }
+  };
+
+  const handleTest = async () => {
+    setTesting(true);
+    setTestResult(null);
+    setTestError(null);
+    try {
+      const res = await fetch(`/api/providers/${connection.id}/test`, { method: "POST" });
+      const data = await res.json();
+      setTestResult(data.valid ? "success" : "failed");
+      if (!data.valid) setTestError(data.error || `HTTP ${res.status}`);
+    } catch (error) {
+      setTestResult("failed");
+      setTestError(error.message);
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -310,6 +330,21 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               </button>
             </Tooltip>
           )}
+          <button
+            onClick={handleTest}
+            disabled={testing}
+            title={testError || undefined}
+            className={`flex flex-col items-center rounded px-2 py-1 transition-colors ${
+              testResult === "success" ? "text-green-500" : testResult === "failed" ? "text-red-500" : "text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
+            }`}
+          >
+            <span className="material-symbols-outlined text-[18px]">
+              {testing ? "progress_activity" : testResult === "success" ? "check_circle" : testResult === "failed" ? "error" : "play_arrow"}
+            </span>
+            <span className="text-[10px] leading-tight">
+              {testing ? "Testing" : testResult === "success" ? "Passed" : testResult === "failed" ? "Failed" : "Test"}
+            </span>
+          </button>
           <button onClick={onEdit} className="flex flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5">
             <span className="material-symbols-outlined text-[18px]">edit</span>
             <span className="text-[10px] leading-tight">Edit</span>
