@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, renameModelAliasPrefix, updateProviderConnection, updateProviderNode } from "@/models";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
@@ -12,6 +12,7 @@ export async function PUT(request, { params }) {
     if (!node) {
       return NextResponse.json({ error: "Provider node not found" }, { status: 404 });
     }
+    const oldPrefix = node.prefix;
 
     if (!name?.trim()) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -73,7 +74,13 @@ export async function PUT(request, { params }) {
       })
     )));
 
-    return NextResponse.json({ node: updated });
+    let migration = null;
+    if (oldPrefix && prefix.trim() !== oldPrefix) {
+      migration = await renameModelAliasPrefix(oldPrefix, prefix.trim());
+      console.log("[prefix-migrate]", { id, oldPrefix, newPrefix: prefix.trim(), ...migration });
+    }
+
+    return NextResponse.json({ node: updated, migration });
   } catch (error) {
     console.log("Error updating provider node:", error);
     return NextResponse.json({ error: "Failed to update provider node" }, { status: 500 });
