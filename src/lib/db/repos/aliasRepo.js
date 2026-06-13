@@ -19,6 +19,45 @@ export async function deleteModelAlias(alias) {
   await aliasKv.remove(alias);
 }
 
+// Rename all modelAliases keys matching `oldPrefix` or `oldPrefix-*` to the
+// equivalent `newPrefix` / `newPrefix-*` keys. Conflict-safe: if a target key
+// already exists, the source is left untouched and reported in `conflicts`.
+// Returns { renamed, skipped, conflicts }.
+export async function renameModelAliasPrefix(oldPrefix, newPrefix) {
+  if (!oldPrefix || !newPrefix || oldPrefix === newPrefix) {
+    return { renamed: 0, skipped: 0, conflicts: [] };
+  }
+  const all = await aliasKv.getAll();
+  const db = await getAdapter();
+  const pairs = [];
+  for (const key of Object.keys(all)) {
+    if (key === oldPrefix || key.startsWith(`${oldPrefix}-`)) {
+      const suffix = key.slice(oldPrefix.length); // "" or "-mimo-v2.5"
+      pairs.push({ oldKey: key, newKey: `${newPrefix}${suffix}`, value: all[key] });
+    }
+  }
+  const conflicts = [];
+  const renamed = [];
+  db.transaction(() => {
+    const existing = new Set(
+      db.all(`SELECT key FROM kv WHERE scope = 'modelAliases'`).map((r) => r.key)
+    );
+    for (const { oldKey, newKey, value } of pairs) {
+      if (existing.has(newKey)) {
+        conflicts.push({ oldKey, newKey });
+        continue;
+      }
+      db.run(`DELETE FROM kv WHERE scope = 'modelAliases' AND key = ?`, [oldKey]);
+      db.run(
+        `INSERT INTO kv(scope, key, value) VALUES('modelAliases', ?, ?)`,
+        [newKey, stringifyJson(value)]
+      );
+      renamed.push({ oldKey, newKey });
+    }
+  });
+  return { renamed: renamed.length, skipped: conflicts.length, conflicts };
+}
+
 // customModels: key=`${providerAlias}|${id}|${type}`, value=full model object
 function customKey(providerAlias, id, type) {
   return `${providerAlias}|${id}|${type}`;
