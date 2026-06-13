@@ -25,6 +25,7 @@ export {
   getModelAliases,
   setModelAlias,
   deleteModelAlias,
+  renameModelAliasPrefix,
   getCustomModels,
   addCustomModel,
   deleteCustomModel,
