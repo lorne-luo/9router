@@ -38,7 +38,7 @@ async function setupTestContext(nodeData) {
   };
 }
 
-function makeRequest(provider) {
+function makeRequest(provider, overrides = {}) {
   return new Request("https://9router.local/api/providers", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -47,6 +47,7 @@ function makeRequest(provider) {
       apiKey: "test-key",
       name: "Test Connection",
       defaultModel: "test-model",
+      ...overrides,
     }),
   });
 }
@@ -145,26 +146,28 @@ describe("compatible provider connections API", () => {
     });
   });
 
-  it("returns 400 for a duplicate connection on the same compatible node", async () => {
+  it("allows multiple connections on the same compatible node", async () => {
     const ctx = await setupTestContext({
-      id: "openai-compatible-duplicate-test",
+      id: "openai-compatible-multi-test",
       type: "openai-compatible",
-      name: "Duplicate Guard Node",
-      prefix: "dup",
+      name: "Multi-Key Node",
+      prefix: "multi",
       apiType: "chat",
-      baseUrl: "https://duplicate-guard.test/v1",
+      baseUrl: "https://multi-key.test/v1",
     });
     cleanup = ctx.cleanup;
 
-    const firstResponse = await ctx.POST(makeRequest(ctx.node.id));
-    const secondResponse = await ctx.POST(makeRequest(ctx.node.id));
+    const firstResponse = await ctx.POST(makeRequest(ctx.node.id, { name: "Key 1" }));
+    const secondResponse = await ctx.POST(makeRequest(ctx.node.id, { name: "Key 2" }));
+    const firstBody = await firstResponse.json();
     const secondBody = await secondResponse.json();
     const storedConnections = await ctx.getProviderConnections({ provider: ctx.node.id });
 
     expect(firstResponse.status).toBe(201);
-    expect(secondResponse.status).toBe(400);
-    expect(secondBody.error).toContain("Only one connection is allowed");
-    expect(storedConnections).toHaveLength(1);
-    expectCompatibleConnection(storedConnections[0], ctx.node, { apiType: "chat" });
+    expect(secondResponse.status).toBe(201);
+    expect(storedConnections).toHaveLength(2);
+    expectCompatibleConnection(firstBody.connection, ctx.node, { apiType: "chat" });
+    expectCompatibleConnection(secondBody.connection, ctx.node, { apiType: "chat" });
+    expect(firstBody.connection.id).not.toBe(secondBody.connection.id);
   });
 });
