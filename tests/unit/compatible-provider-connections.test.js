@@ -47,6 +47,7 @@ function makeRequest(provider, name = "Test Connection") {
       apiKey: "test-key",
       name,
       defaultModel: "test-model",
+      ...overrides,
     }),
   });
 }
