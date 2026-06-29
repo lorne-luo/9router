@@ -1169,18 +1169,6 @@ export default function ProviderLimits() {
                         </button>
                       </Tooltip>
                     )}
-                    {conn.provider === "claude" && conn.authType === "oauth" && (
-                      <Tooltip text="When your 5h quota runs out, auto-sends a request the moment it resets so a new window starts right away.">
-                        <button
-                          type="button"
-                          onClick={() => toggleAutoPing(conn.id, !(autoPingMap[conn.id] === true))}
-                          aria-label="Toggle auto-ping"
-                          className={`flex h-8 w-8 items-center justify-center rounded-lg transition-colors hover:bg-black/5 dark:hover:bg-white/5 ${autoPingMap[conn.id] === true ? "text-primary" : "text-text-muted"}`}
-                        >
-                          <span className="material-symbols-outlined text-[18px]">bolt</span>
-                        </button>
-                      </Tooltip>
-                    )}
                     <Tooltip text="Refresh quota">
                       <button
                         type="button"
