@@ -127,6 +127,20 @@ Default URLs:
 
 <table>
   <tr>
+  <td align="center" width="320">
+  <a href="https://youtu.be/3dF5GIYMrcQ?si=bAyfyiHbARJQAHj_">
+    <img src="https://img.youtube.com/vi/3dF5GIYMrcQ/maxresdefault.jpg" alt="9Router Setup Tutorial" width="300"/>
+  </a><br/>
+  <b>🇺🇸 English</b><br/>
+  <sub>9Router + Claude Code FREE Setup<br/>by <a href="https://www.youtube.com/@BuildAIWithHamid">Build AI With Hamid</a></sub>
+</td>
+<td align="center" width="320">
+      <a href="https://youtu.be/VQAw612S27Y">
+        <img src="https://img.youtube.com/vi/VQAw612S27Y/maxresdefault.jpg" alt="9Router + Claude Code FREE Unlimited Setup" width="300"/>
+      </a><br/>
+      <b>🇵🇰 اردو / हिन्दी</b><br/>
+      <sub>9Router + Claude Code FREE Unlimited Setup<br/>by <a href="https://www.youtube.com/@BuildAIWithHamid">Build AI With Hamid</a></sub>
+    </td>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=X69n5Lm06Yw">
         <img src="https://img.youtube.com/vi/X69n5Lm06Yw/maxresdefault.jpg" alt="Tiết kiệm chi phí LLM với 9Router" width="300"/>
@@ -162,8 +176,6 @@ Default URLs:
       <b>🇺🇸 English</b><br/>
       <sub>Claude Code FREE Forever — Unlimited Models<br/>by <a href="https://www.youtube.com/@BuildAIWithHamid">Build AI With Hamid</a></sub>
     </td>
-  </tr>
-  <tr>
     <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=Ttpc26m39Dw">
         <img src="https://img.youtube.com/vi/Ttpc26m39Dw/maxresdefault.jpg" alt="Claude CLI Free Setup" width="300"/>
@@ -171,7 +183,10 @@ Default URLs:
       <b>🇺🇸 English</b><br/>
       <sub>Claude CLI Free Setup with 9Router 🚀<br/>by <a href="https://www.youtube.com/@CodeVerseSoban">CodeVerse Soban</a></sub>
     </td>
-    <td align="center" width="320">
+    
+  </tr>
+  <tr>
+  <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=G-5A_D5Pm6Y">
         <img src="https://img.youtube.com/vi/G-5A_D5Pm6Y/maxresdefault.jpg" alt="Cài đặt OpenClaw Free A-Z" width="300"/>
       </a><br/>
@@ -192,7 +207,11 @@ Default URLs:
       <b>🇮🇩 Indonesia</b><br/>
       <sub>Koding 24 Jam Anti Rate Limit! Hemat Token AI 65% | Tutorial Quick Setup 9Router 🚀<br/>by <a href="https://www.youtube.com/@krisswuh">Krisswuh</a></sub>
     </td>
-    <td align="center" width="320">
+    
+  </tr>
+  
+  <tr>
+  <td align="center" width="320">
       <a href="https://www.youtube.com/watch?v=TXGv4eofe1I">
         <img src="https://img.youtube.com/vi/TXGv4eofe1I/mqdefault.jpg" alt="Cara Deploy 9Router di Hugging Face GRATIS Non-Stop! | Alternatif VPS RAM 16GB" width="300"/>
       </a><br/>
