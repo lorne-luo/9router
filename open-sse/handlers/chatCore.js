@@ -22,8 +22,8 @@ import { detectClientTool, isNativePassthrough } from "../utils/clientDetector.j
 import { dedupeTools } from "../utils/toolDeduper.js";
 import { injectCaveman } from "../rtk/caveman.js";
 import { injectPonytail } from "../rtk/ponytail.js";
-import { compressMessages, formatRtkLog } from "../rtk/index.js";
-import { compressWithHeadroom, formatHeadroomLog, formatHeadroomSizeLog, isHeadroomPhantomSavings } from "../rtk/headroom.js";
+import { compressMessages } from "../rtk/index.js";
+import { compressWithHeadroom, formatHeadroomSizeLog, isHeadroomPhantomSavings } from "../rtk/headroom.js";
 import { compressWithPxpipe } from "../rtk/pxpipe.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { stripUnsupportedModalities } from "../translator/concerns/modality.js";
@@ -250,25 +250,31 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   // Per-request opt-out: client can bypass all token savers via header
   const tokenSaverEnabled = clientRawRequest?.headers?.[TOKEN_SAVER_HEADER]?.toLowerCase() !== "off";
 
+  // Token-saver summary parts, printed as one "⚙" line at the end (only active ones)
+  const xf = [];
+
   // RTK: compress tool_result content
   const rtkStats = compressMessages(translatedBody, tokenSaverEnabled && rtkEnabled);
-  const rtkLine = formatRtkLog(rtkStats);
-  if (rtkLine) console.log(rtkLine);
+  if (rtkStats?.hits?.length) {
+    const saved = rtkStats.bytesBefore - rtkStats.bytesAfter;
+    const pct = rtkStats.bytesBefore > 0 ? ((saved / rtkStats.bytesBefore) * 100).toFixed(0) : "0";
+    xf.push(`RTK −${saved}B(${pct}%)`);
+  }
 
   // Headroom: optional external proxy compression; fail open if proxy is absent.
   const headroomDiagnostics = {};
   const headroomStats = await compressWithHeadroom(translatedBody, { enabled: tokenSaverEnabled && headroomEnabled, url: headroomUrl, model: upstreamModel, format: finalFormat, compressUserMessages: headroomCompressUserMessages, timeoutMs: headroomTimeoutMs, diagnostics: headroomDiagnostics });
-  const headroomLine = formatHeadroomLog(headroomStats);
-  const headroomSizeLine = formatHeadroomSizeLog(headroomDiagnostics);
-  if (headroomLine) {
-    log?.info?.("HEADROOM", `${headroomLine}${headroomSizeLine ? ` | ${headroomSizeLine}` : ""}`);
+  if (headroomStats) {
+    const before = headroomStats.tokens_before || 0;
+    const delta = headroomStats.tokens_saved || 0;
+    const pct = before > 0 ? ((delta / before) * 100).toFixed(1) : "0";
+    xf.push(`HEADROOM −${delta}tok(${pct}%)`);
     if (isHeadroomPhantomSavings(headroomStats, headroomDiagnostics)) {
       log?.warn?.("HEADROOM", `reported token delta, but outbound JSON shrank <5%; provider may bill near-original payload | ${formatHeadroomSizeLog(headroomDiagnostics)}`);
     }
-  } else if (tokenSaverEnabled && headroomEnabled) log?.warn?.("HEADROOM", `skipped: ${headroomDiagnostics.reason || "compression unavailable"}${headroomDiagnostics.endpoint ? ` (${headroomDiagnostics.endpoint})` : ""}`);
-
-  // Token-saver flags accumulator for the single "⚙" log line below.
-  const xf = [];
+  } else if (tokenSaverEnabled && headroomEnabled) {
+    log?.warn?.("HEADROOM", `skipped: ${headroomDiagnostics.reason || "compression unavailable"}${headroomDiagnostics.endpoint ? ` (${headroomDiagnostics.endpoint})` : ""}`);
+  }
 
   // Caveman: inject terse-style system prompt
   if (tokenSaverEnabled && cavemanEnabled && cavemanLevel) {
