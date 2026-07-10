@@ -5,18 +5,21 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
 const originalDataDir = process.env.DATA_DIR;
 let tempDir;
-let renameModelAliasPrefix, getModelAliases;
+let renameModelAliasPrefix, getModelAliases, setModelAlias;
 
 beforeEach(async () => {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-alias-rename-"));
   process.env.DATA_DIR = tempDir;
-  // Reset modules to get fresh db instance
+  // Reset modules AND the cached adapter (driver.js caches it on globalThis,
+  // which vi.resetModules() does not clear) so each test gets a fresh DB.
   vi.resetModules();
+  global._dbAdapter = null;
   const db = await import("@/lib/db/index.js");
   await db.initDb();
   const repo = await import("@/lib/db/repos/aliasRepo.js");
   renameModelAliasPrefix = repo.renameModelAliasPrefix;
   getModelAliases = repo.getModelAliases;
+  setModelAlias = repo.setModelAlias;
 });
 
 afterEach(() => {
@@ -27,70 +30,48 @@ afterEach(() => {
 });
 
 describe("renameModelAliasPrefix", () => {
-  it("renames all matching prefix-* keys to new prefix", async () => {
-    const db = await import("@/lib/db/index.js").then(m => m.default);
-    await db.run(`INSERT INTO kv(scope, key, value) VALUES('modelAliases', 'xiaomi-foo', '"v1"')`);
-    await db.run(`INSERT INTO kv(scope, key, value) VALUES('modelAliases', 'xiaomi-bar', '"v2"')`);
-    await db.run(`INSERT INTO kv(scope, key, value) VALUES('modelAliases', 'other-baz', '"v3"')`);
+  // Aliases are stored as { aliasName: "provider/model" }; the provider prefix
+  // lives in the value, keyed by an arbitrary user-chosen alias name.
+  it("rewrites every alias value pointing at the old prefix", async () => {
+    await setModelAlias("fast", "xiaomi/mimo-v2.5");
+    await setModelAlias("smart", "xiaomi/mimo-pro");
+    await setModelAlias("gpt", "openai/gpt-4");
 
     const result = await renameModelAliasPrefix("xiaomi", "xiaomi2");
 
-    expect(result).toEqual({ renamed: 2, skipped: 0, conflicts: [] });
+    expect(result).toEqual({ migrated: 2 });
     const aliases = await getModelAliases();
     expect(aliases).toEqual({
-      "xiaomi2-foo": "v1",
-      "xiaomi2-bar": "v2",
-      "other-baz": "v3",
+      fast: "xiaomi2/mimo-v2.5",
+      smart: "xiaomi2/mimo-pro",
+      gpt: "openai/gpt-4",
     });
   });
 
-  it("skips rename when target key already exists", async () => {
-    const db = await import("@/lib/db/index.js").then(m => m.default);
-    await db.run(`INSERT INTO kv(scope, key, value) VALUES('modelAliases', 'xiaomi-foo', '"v1"')`);
-    await db.run(`INSERT INTO kv(scope, key, value) VALUES('modelAliases', 'xiaomi2-foo', '"v2"')`);
+  it("leaves the alias name (key) untouched", async () => {
+    // An alias whose NAME happens to equal the prefix must not be renamed.
+    await setModelAlias("xiaomi", "openai/gpt-4");
 
     const result = await renameModelAliasPrefix("xiaomi", "xiaomi2");
 
-    expect(result).toEqual({
-      renamed: 0,
-      skipped: 1,
-      conflicts: [{ oldKey: "xiaomi-foo", newKey: "xiaomi2-foo" }],
-    });
+    expect(result).toEqual({ migrated: 0 });
     const aliases = await getModelAliases();
-    expect(aliases).toEqual({
-      "xiaomi-foo": "v1",
-      "xiaomi2-foo": "v2",
-    });
+    expect(aliases).toEqual({ xiaomi: "openai/gpt-4" });
   });
 
-  it("handles bare prefix key (no dash)", async () => {
-    const db = await import("@/lib/db/index.js").then(m => m.default);
-    await db.run(`INSERT INTO kv(scope, key, value) VALUES('modelAliases', 'xiaomi', '"v1"')`);
+  it("does not touch a prefix that is only a substring of another provider", async () => {
+    await setModelAlias("a", "xiaomixyz/model");
+    await setModelAlias("b", "mimo/model");
 
     const result = await renameModelAliasPrefix("xiaomi", "xiaomi2");
 
-    expect(result).toEqual({ renamed: 1, skipped: 0, conflicts: [] });
+    expect(result).toEqual({ migrated: 0 });
     const aliases = await getModelAliases();
-    expect(aliases).toEqual({ "xiaomi2": "v1" });
+    expect(aliases).toEqual({ a: "xiaomixyz/model", b: "mimo/model" });
   });
 
   it("returns zero when oldPrefix === newPrefix", async () => {
     const result = await renameModelAliasPrefix("xiaomi", "xiaomi");
-    expect(result).toEqual({ renamed: 0, skipped: 0, conflicts: [] });
-  });
-
-  it("does not touch unrelated keys", async () => {
-    const db = await import("@/lib/db/index.js").then(m => m.default);
-    await db.run(`INSERT INTO kv(scope, key, value) VALUES('modelAliases', 'other-key', '"v1"')`);
-    await db.run(`INSERT INTO kv(scope, key, value) VALUES('modelAliases', 'mimoc-key', '"v2"')`);
-
-    const result = await renameModelAliasPrefix("xiaomi", "xiaomi2");
-
-    expect(result).toEqual({ renamed: 0, skipped: 0, conflicts: [] });
-    const aliases = await getModelAliases();
-    expect(aliases).toEqual({
-      "other-key": "v1",
-      "mimoc-key": "v2",
-    });
+    expect(result).toEqual({ migrated: 0 });
   });
 });
