@@ -22,7 +22,7 @@ beforeAll(async () => {
   vi.resetModules();
   db = await import("@/lib/db/index.js");
   await db.initDb();
-  await db.updateSettings({ enableObservability2: true, observabilityBatchSize: 1 });
+  await db.updateSettings({ enableObservability: true, observabilityBatchSize: 1 });
 
   const { getAdapter } = await import("@/lib/db/driver.js");
   adapter = await getAdapter();
@@ -35,6 +35,7 @@ afterAll(() => {
 });
 
 describe("request details — tab crash-risk cases", () => {
+
   it("corrupt data column → parseJson fallback {}, no throw", async () => {
     // Inject a row with invalid JSON directly, bypassing save path
     adapter.run(
