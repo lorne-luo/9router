@@ -73,7 +73,9 @@ export function createResponsesApiTransformStream(logger = null) {
     funcArgsDone: {},
     funcItemDone: {},
     buffer: "",
-    completedSent: false
+    completedSent: false,
+    model: null,
+    usage: null
   };
 
   const encoder = new TextEncoder();
@@ -225,17 +227,47 @@ export function createResponsesApiTransformStream(logger = null) {
   const sendCompleted = (controller) => {
     if (!state.completedSent) {
       state.completedSent = true;
-      emit(controller, "response.completed", {
-        type: "response.completed",
-        response: {
-          id: state.responseId,
-          object: "response",
-          created_at: state.created,
-          status: "completed",
-          background: false,
-          error: null
-        }
-      });
+
+      // Assemble the output items streamed this turn. OpenAI Responses API
+      // requires response.completed to carry them in response.output; a stream
+      // with no content must at least yield [].
+      const output = [
+        ...Object.keys(state.msgItemDone).map((idx) => ({
+          id: `msg_${state.responseId}_${idx}`,
+          type: "message",
+          content: [{ type: "output_text", annotations: [], logprobs: [], text: state.msgTextBuf[idx] || "" }],
+          role: "assistant"
+        })),
+        ...(state.reasoningDone ? [{
+          id: state.reasoningId,
+          type: "reasoning",
+          summary: [{ type: "summary_text", text: state.reasoningBuf }]
+        }] : []),
+        ...Object.keys(state.funcItemDone).map((idx) => ({
+          id: `fc_${state.funcCallIds[idx]}`,
+          type: "function_call",
+          arguments: state.funcArgsBuf[idx] || "{}",
+          call_id: state.funcCallIds[idx],
+          name: state.funcNames[idx] || ""
+        }))
+      ];
+
+      const response = {
+        id: state.responseId,
+        object: "response",
+        created_at: state.created,
+        status: "completed",
+        background: false,
+        error: null,
+        model: state.model,
+        output
+      };
+
+      if (state.usage && typeof state.usage === "object") {
+        response.usage = state.usage;
+      }
+
+      emit(controller, "response.completed", { type: "response.completed", response });
     }
   };
 
@@ -265,7 +297,12 @@ export function createResponsesApiTransformStream(logger = null) {
         }
 
         if (!parsed.choices?.length) continue;
-        
+
+        if (parsed.model) state.model = parsed.model;
+        if (parsed.usage && typeof parsed.usage === "object" && parsed.usage.prompt_tokens !== undefined) {
+          state.usage = parsed.usage;
+        }
+
         const choice = parsed.choices[0];
         const idx = choice.index || 0;
         const delta = choice.delta || {};

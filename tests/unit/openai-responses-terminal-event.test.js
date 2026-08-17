@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import { FORMATS } from "../../open-sse/translator/formats.js";
+import { initState } from "../../open-sse/translator/index.js";
+import { openaiToOpenAIResponsesResponse } from "../../open-sse/translator/response/openai-responses.js";
 import { createSSETransformStreamWithLogger } from "../../open-sse/utils/stream.js";
 
 async function runTransform(input) {
@@ -92,5 +94,51 @@ describe("OpenAI Responses streaming termination", () => {
     expect(output.indexOf("event: response.failed")).toBeLessThan(output.indexOf("data: [DONE]"));
     expect(output.match(/data: \[DONE\]/g)).toHaveLength(1);
     expect(output).not.toContain("data: null");
+  });
+});
+
+describe("response.completed response object completeness", () => {
+  it("carries output, model and usage on the terminal completed event", () => {
+    const state = initState(FORMATS.OPENAI_RESPONSES);
+    state.model = "free";
+    state.usage = { prompt_tokens: 11, completion_tokens: 2, total_tokens: 13 };
+
+    const chunks = [
+      { id: "cmpl-x", model: "free", choices: [{ index: 0, delta: { content: "hi" }, finish_reason: null }] },
+      { id: "cmpl-x", model: "free", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+    ];
+
+    const events = chunks.flatMap((chunk) => openaiToOpenAIResponsesResponse(chunk, state));
+    const completed = events.find((e) => e.event === "response.completed");
+
+    expect(completed).toBeTruthy();
+    expect(completed.data.response).toMatchObject({
+      id: state.responseId,
+      object: "response",
+      status: "completed",
+      model: "free",
+      usage: { prompt_tokens: 11, completion_tokens: 2, total_tokens: 13 },
+    });
+    expect(completed.data.response.output).toEqual([
+      {
+        id: `msg_${state.responseId}_0`,
+        type: "message",
+        content: [{ type: "output_text", annotations: [], logprobs: [], text: "hi" }],
+        role: "assistant",
+      },
+    ]);
+  });
+
+  it("emits an empty output array when the stream had no output items", () => {
+    const state = initState(FORMATS.OPENAI_RESPONSES);
+    state.model = "free";
+
+    const events = [
+      { id: "cmpl-empty", model: "free", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] },
+    ].flatMap((chunk) => openaiToOpenAIResponsesResponse(chunk, state));
+    const completed = events.find((e) => e.event === "response.completed");
+
+    expect(completed.data.response.output).toEqual([]);
+    expect(completed.data.response.model).toBe("free");
   });
 });

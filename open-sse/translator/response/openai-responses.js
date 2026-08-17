@@ -368,17 +368,52 @@ function closeToolCall(state, emit, idx) {
 function sendCompleted(state, emit) {
   if (!state.completedSent) {
     state.completedSent = true;
-    emit("response.completed", {
-      type: "response.completed",
-      response: {
-        id: state.responseId,
-        object: "response",
-        created_at: state.created,
-        status: "completed",
-        background: false,
-        error: null
-      }
-    });
+
+    // Assemble the full output items that were streamed this turn. Every item
+    // type was already emitted as a "done" event; the OpenAI Responses spec
+    // requires `response.completed` to carry them in `response.output`
+    // (clients iterate it, and an empty stream must at least yield []).
+    const output = [
+      ...Object.keys(state.msgItemDone).map((idx) => ({
+        id: `msg_${state.responseId}_${idx}`,
+        type: RESPONSES_ITEM.MESSAGE,
+        content: [{ type: RESPONSES_ITEM.OUTPUT_TEXT, annotations: [], logprobs: [], text: state.msgTextBuf[idx] || "" }],
+        role: ROLE.ASSISTANT
+      })),
+      ...(state.reasoningDone ? [{
+        id: state.reasoningId,
+        type: RESPONSES_ITEM.REASONING,
+        summary: [{ type: RESPONSES_ITEM.SUMMARY_TEXT, text: state.reasoningBuf }]
+      }] : []),
+      ...Object.keys(state.funcItemDone).map((idx) => {
+        const callId = state.funcCallIds[idx];
+        const custom = isCustomTool(state, state.funcNames[idx]);
+        return {
+          id: `${custom ? "ctc" : "fc"}_${callId}`,
+          type: custom ? RESPONSES_ITEM.CUSTOM_TOOL_CALL : RESPONSES_ITEM.FUNCTION_CALL,
+          ...(custom ? { input: extractCustomToolInput(state.funcArgsBuf[idx] || "") } : { arguments: state.funcArgsBuf[idx] || "{}" }),
+          call_id: callId,
+          name: state.funcNames[idx] || ""
+        };
+      })
+    ];
+
+    const response = {
+      id: state.responseId,
+      object: "response",
+      created_at: state.created,
+      status: "completed",
+      background: false,
+      error: null,
+      model: state.model || MODEL_FALLBACK,
+      output
+    };
+
+    if (state.usage && typeof state.usage === "object") {
+      response.usage = state.usage;
+    }
+
+    emit("response.completed", { type: "response.completed", response });
   }
 }
 
