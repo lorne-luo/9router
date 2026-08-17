@@ -470,6 +470,7 @@ function sendCompleted(state, emit) {
         status: "completed",
         background: false,
         error: null,
+        model: state.model || MODEL_FALLBACK,
         output: collectCompletedOutputItems(state),
         ...(state.responsesUsage ? { usage: state.responsesUsage } : {})
       }
