@@ -307,6 +307,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       
       // Success (2xx) - return response
       if (result.ok) {
+        // A 2xx only establishes the SSE stream; validate its first semantic event.
         result = await preflightDsmlResponse(result, { body, model: modelStr });
         log.info("COMBO", `Model ${modelStr} succeeded`);
         return result;

@@ -1,5 +1,7 @@
+// Match protocol-shaped tags only; ordinary prose containing "invoke" is safe.
 const DSML_MARKER_RE = /<\s*\/?\s*(?:(?:｜|\|)DSML(?:｜|\|)\s*)?(?:tool_calls|invoke|parameter)(?:\s|>|\/)/iu;
 const DETECTOR_TAIL_LENGTH = 64;
+// Bound preflight latency; the passthrough guard remains active after release.
 const PREFLIGHT_BYTE_LIMIT = 16 * 1024;
 const DSML_MARKER_PREFIXES = [
   "<invoke",
@@ -55,25 +57,22 @@ export function createDsmlLeakDetector() {
 }
 
 function replayResponse(response, bufferedChunks, reader) {
+  let bufferedIndex = 0;
+  // Pull on demand so the short preflight does not drain a long upstream stream.
   const body = new ReadableStream({
-    start(controller) {
-      for (const chunk of bufferedChunks) controller.enqueue(chunk);
-
-      const pump = async () => {
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              controller.close();
-              return;
-            }
-            controller.enqueue(value);
-          }
-        } catch (error) {
-          controller.error(error);
-        }
-      };
-      void pump();
+    async pull(controller) {
+      if (bufferedIndex < bufferedChunks.length) {
+        controller.enqueue(bufferedChunks[bufferedIndex]);
+        bufferedIndex += 1;
+        return;
+      }
+      try {
+        const { done, value } = await reader.read();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      } catch (error) {
+        controller.error(error);
+      }
     },
     cancel(reason) {
       return reader.cancel(reason);
@@ -139,6 +138,7 @@ export async function preflightDsmlResponse(response, { body, model } = {}) {
       for (const line of lines) {
         const inspected = inspectSseLine(line, detector);
         if (inspected.leaked) throw new DsmlProtocolError();
+        // Keep buffering when a protocol marker may continue in the next delta.
         semantic ||= inspected.semantic && !inspected.pending;
       }
     }

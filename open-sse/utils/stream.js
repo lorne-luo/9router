@@ -189,6 +189,7 @@ export function createSSEStream(options = {}) {
               const content = delta?.content;
               const reasoning = delta?.reasoning_content;
               if (content && typeof content === "string") {
+                // Preflight catches early leaks; this stops leaks appearing later.
                 if (dsmlLeakDetector?.push(content)) {
                   controller.error(new DsmlProtocolError());
                   return;

@@ -89,6 +89,33 @@ describe("DeepSeek DSML response preflight", () => {
     await expect(response.text()).resolves.toBe(raw);
   });
 
+  it("does not drain the upstream before the client pulls", async () => {
+    let pulls = 0;
+    const upstream = new Response(new ReadableStream({
+      pull(controller) {
+        pulls += 1;
+        if (pulls === 1) {
+          controller.enqueue(encoder.encode(sse({ content: "hello" })));
+        } else if (pulls <= 50) {
+          controller.enqueue(encoder.encode(sse({ content: "more" })));
+        } else {
+          controller.close();
+        }
+      },
+    }), {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+
+    const response = await preflightDsmlResponse(upstream, {
+      body: guardedBody,
+      model: guardedModel,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    expect(pulls).toBeLessThan(10);
+    await response.body.cancel();
+  });
+
   it("cancels malformed DSML and lets a combo use its next model", async () => {
     let cancelled = false;
     const broken = sse({ content: "</｜DSML｜tool_calls>" });
