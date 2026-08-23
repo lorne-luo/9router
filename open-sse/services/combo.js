@@ -8,6 +8,7 @@ import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { parseModel } from "./model.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 import { peekStreamForContent, reconstructStream, isNoRetryFinish } from "./emptyFailover.js";
+import { preflightDsmlResponse } from "../utils/dsmlGuard.js";
 import {
   getStickyComboModel,
   setStickyComboModel,
@@ -524,8 +525,13 @@ export async function handleComboChat({
         }
 
         if (peeked.outcome === "content") {
+          // A 2xx only establishes the SSE stream; validate its first semantic event.
+          // Past the peek deadline the stream is committed fail-open; don't hold it longer.
+          const response = peeked.timedOut
+            ? peeked.response
+            : await preflightDsmlResponse(peeked.response, { body, model: modelStr });
           log.info("COMBO", `Model ${modelStr} succeeded${peeked.timedOut ? " (peek deadline; committed)" : ""}`);
-          return peeked.response;
+          return response;
         }
 
         // Empty generation. Fall through to the next candidate unless this is a legitimately
