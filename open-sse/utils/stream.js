@@ -4,10 +4,12 @@ import { PROVIDERS } from "../config/providers.js";
 import { liftReasoningAliases } from "../translator/concerns/reasoning.js";
 import { trackPendingRequest, appendRequestLog } from "@/lib/usageDb.js";
 import { extractUsage, mergeUsage, hasValidUsage, estimateUsage, logUsage, addBufferToUsage, filterUsageForFormat, COLORS } from "./usageTracking.js";
-import { parseSSELine, hasValuableContent, fixInvalidId, formatSSE, ensureStreamToolCallIds } from "./streamHelpers.js";
+import { parseSSELine, hasValuableContent, fixInvalidId, formatSSE, ensureStreamToolCallIds, buildStreamErrorBytes } from "./streamHelpers.js";
 import { restoreToolNames } from "./opencodeFingerprint.js";
 import { getOpenAIResponsesEventName, isOpenAIResponsesTerminalEvent, formatIncompleteOpenAIResponsesStreamFailure } from "./responsesStreamHelpers.js";
 import { dbg, isDebugEnabled } from "./debugLog.js";
+import { createDsmlLeakDetector, DSML_LEAK_MESSAGE, shouldGuardDsml, inspectDsmlEvent } from "./dsmlGuard.js";
+import { HTTP_STATUS } from "../config/runtimeConfig.js";
 
 import { SSE_DONE, SSE_HEADERS, SSE_HEADERS_NO_BUFFER } from "./sseConstants.js";
 
@@ -133,6 +135,17 @@ export function createSSEStream(options = {}) {
       }, finalUsage, ttftAt);
     }
   };
+  const dsmlLeakDetector = shouldGuardDsml(body, model)
+    ? createDsmlLeakDetector()
+    : null;
+  // End with a client-format error frame rather than controller.error(): the
+  // disconnect wrapper would replace an error with a generic "connection lost"
+  // frame that neither the client nor the combo preflight can attribute.
+  const stopOnDsmlLeak = (controller) => {
+    finalizeStream();
+    controller.enqueue(buildStreamErrorBytes(HTTP_STATUS.BAD_GATEWAY, DSML_LEAK_MESSAGE, sourceFormat));
+    controller.terminate();
+  };
 
   // Emit the deferred response.completed now — at [DONE], or when the watchdog
   // below gives up on a usage trailer that never arrives.
@@ -185,6 +198,10 @@ export function createSSEStream(options = {}) {
           if (trimmed.startsWith("data:") && trimmed.slice(5).trim() !== "[DONE]") {
             try {
               let parsed = JSON.parse(trimmed.slice(5).trim());
+              if (dsmlLeakDetector && inspectDsmlEvent(parsed, dsmlLeakDetector).leaked) {
+                stopOnDsmlLeak(controller);
+                return;
+              }
 
               const idFixed = fixInvalidId(parsed);
 
@@ -322,6 +339,10 @@ export function createSSEStream(options = {}) {
 
         const parsed = parseSSELine(trimmed, targetFormat);
         if (!parsed) continue;
+        if (dsmlLeakDetector && inspectDsmlEvent(parsed, dsmlLeakDetector).leaked) {
+          stopOnDsmlLeak(controller);
+          return;
+        }
 
         // Responses API same-format passthrough: preserve event framing + track terminal state
         const isOpenAIResponsesStream = targetFormat === FORMATS.OPENAI_RESPONSES;
@@ -478,6 +499,14 @@ export function createSSEStream(options = {}) {
       try {
         const remaining = decoder.decode();
         if (remaining) buffer += remaining;
+        // The final SSE data line may arrive without a trailing newline.
+        if (dsmlLeakDetector && buffer.trim()) {
+          const parsed = parseSSELine(buffer.trim(), targetFormat || FORMATS.OPENAI);
+          if (parsed && inspectDsmlEvent(parsed, dsmlLeakDetector).leaked) {
+            stopOnDsmlLeak(controller);
+            return;
+          }
+        }
 
         if (mode === STREAM_MODE.PASSTHROUGH) {
           // An unterminated trailing "data: [DONE]" is the upstream sentinel: don't
