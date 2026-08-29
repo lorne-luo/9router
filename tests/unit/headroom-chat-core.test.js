@@ -159,7 +159,7 @@ describe("handleChatCore Headroom diagnostics", () => {
   });
 
   it("sends Headroom-compressed messages to the provider executor", async () => {
-    const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn() };
+    const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), line: vi.fn() };
     const original = "very large context that should be replaced";
     const compressed = "compressed context";
 
@@ -200,12 +200,10 @@ describe("handleChatCore Headroom diagnostics", () => {
       }),
     }));
     expect(JSON.stringify(executeMock.mock.calls[0][0].body)).not.toContain(original);
-    expect(log.info).toHaveBeenCalledWith("HEADROOM", expect.stringContaining("reported token delta=90 before=100 after=10"));
-    expect(log.info).toHaveBeenCalledWith("HEADROOM", expect.stringContaining("body="));
-    expect(log.info).toHaveBeenCalledWith("HEADROOM", expect.stringContaining("messages="));
+    // Savers report through the single unified "⚙" summary line, not a per-saver HEADROOM log.
+    expect(log.line).toHaveBeenCalledWith(expect.any(String), "⚙", expect.stringContaining("HEADROOM"));
 
-    const logs = JSON.stringify([...log.info.mock.calls, ...log.warn.mock.calls]);
-    expect(logs).not.toContain("saved");
+    const logs = JSON.stringify([...log.info.mock.calls, ...log.warn.mock.calls, ...log.line.mock.calls]);
     expect(logs).not.toContain(original);
   });
 
