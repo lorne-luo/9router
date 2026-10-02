@@ -4,6 +4,7 @@ import { getCapabilitiesForModel } from "./capabilities.js";
 import { matchPattern } from "./pricing.js";
 import { resolveKiroEffortPath } from "../config/kiroConstants.js";
 import { getProviderModels } from "../config/providerModels.js";
+import { COMMANDCODE_EFFORT_ORDER, COMMANDCODE_MODEL_LEVELS } from "../config/commandcodeConstants.js";
 
 // Shared level sets (deduped) — verified against provider docs + wire in thinkingUnified.applyFormat.
 const L = {
@@ -27,7 +28,7 @@ const FORMAT_LEVELS = {
   qwen: L.base,
   kimi: L.levelMax,
   deepseek: L.hiMax,
-  commandcode: ["none", "low", "medium", "high", "xhigh", "max"],
+  commandcode: COMMANDCODE_EFFORT_ORDER,
   minimax: L.onOff,
   hunyuan: L.base,
   step: L.base,
@@ -114,7 +115,7 @@ export function getThinkingLevels(provider, model) {
   const baseId = String(model || "").replace(/\([^()]+\)\s*$/, "");
   const modelLevels = provider === "codex"
     ? getProviderModels("cx").find((entry) => entry.id === baseId)?.thinkingLevels
-    : null;
+    : provider === "commandcode" ? COMMANDCODE_MODEL_LEVELS[baseId] : null;
   const hit = PATTERN_THINKING.find((entry) =>
     (!entry.provider || entry.provider === provider) && matchPattern(entry.pattern, model)
   );

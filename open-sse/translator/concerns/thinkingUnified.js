@@ -6,6 +6,7 @@ import { getCapabilitiesForModel } from "../../providers/capabilities.js";
 import { getThinkingLevels } from "../../providers/thinkingLevels.js";
 import { PROVIDERS } from "../../providers/index.js";
 import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel } from "./thinking.js";
+import { COMMANDCODE_EFFORT_ORDER, COMMANDCODE_EFFORT_OFF } from "../../config/commandcodeConstants.js";
 
 // Map a target wire-format to its native thinking format (when capability has none).
 const FORMAT_TO_NATIVE = {
@@ -188,6 +189,18 @@ function toKimiReasoningEffort(cfg) {
   if (level === "xhigh") return "max";
   if (["low", "medium", "high", "max"].includes(level)) return level;
   return null;
+}
+
+// Map a unified level onto CommandCode's wire enum, clamped to the model's
+// offered set: smallest offered level >= the request, else the highest offered.
+function toCommandCodeEffort(level, supportedLevels) {
+  const want = level === "minimal" ? "low" : level === "ultra" ? "max" : level;
+  const idx = COMMANDCODE_EFFORT_ORDER.indexOf(want);
+  if (idx < 0) return null;
+  const offered = COMMANDCODE_EFFORT_ORDER.filter((l) => !supportedLevels || supportedLevels.includes(l));
+  if (!offered.length) return null;
+  const pick = offered.find((l) => COMMANDCODE_EFFORT_ORDER.indexOf(l) >= idx) || offered[offered.length - 1];
+  return pick === "none" ? COMMANDCODE_EFFORT_OFF : pick;
 }
 
 const GEMINI_LEVEL_OUTPUT_FLOOR = {
@@ -418,13 +431,11 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, model = "")
       break;
     case "commandcode": {
       // Native CLI sends reasoning_effort inside params of the /alpha/generate envelope.
+      // Upstream rejects values outside its enum, so map + clamp (config/commandcodeConstants.js).
       if (!body.params || typeof body.params !== "object") body.params = {};
-      if (none && canDisable) {
-        delete body.params.reasoning_effort;
-        break;
-      }
-      const level = toLevel(eff);
-      if (level) body.params.reasoning_effort = level;
+      if (eff.mode === "auto") break; // omit → upstream default
+      const effort = toCommandCodeEffort(none && canDisable ? "none" : toLevel(eff), supportedLevels);
+      if (effort) body.params.reasoning_effort = effort;
       break;
     }
     default:

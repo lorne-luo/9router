@@ -7,6 +7,7 @@ import {
   applyThinking,
 } from "../../open-sse/translator/concerns/thinkingUnified.js";
 import { extractReasoningText } from "../../open-sse/translator/concerns/reasoning.js";
+import { getThinkingLevels } from "../../open-sse/providers/thinkingLevels.js";
 
 const apply = (targetFormat, model, body, provider) => {
   const b = JSON.parse(JSON.stringify(body));
@@ -272,6 +273,53 @@ describe("applyThinking per provider format", () => {
       reasoning_effort: "max",
     }, "commandcode");
     expect(out.params.reasoning_effort).toBe("max");
+  });
+});
+
+// /alpha/generate validates params.reasoning_effort against
+// off|low|medium|high|xhigh|max (probed live: "none"/"minimal"/"auto" → 400),
+// and each model only offers a subset (official CLI per-model table).
+describe("applyThinking — commandcode effort mapping", () => {
+  const WIRE = ["off", "low", "medium", "high", "xhigh", "max"];
+  const effort = (model) =>
+    apply("commandcode", model, { params: { messages: [] } }, "commandcode").params.reasoning_effort;
+
+  it("maps none → off when the model can switch thinking off", () => {
+    expect(effort("deepseek/deepseek-v4.1-flash(none)")).toBe("off");
+  });
+  it("maps none → lowest offered level when the model has no off", () => {
+    expect(effort("z-ai/glm-5.3-flash(none)")).toBe("low");
+  });
+  it("keeps max for glm-5.3-flash (offered: low/high/max)", () => {
+    expect(effort("z-ai/glm-5.3-flash(max)")).toBe("max");
+  });
+  it("rounds an unoffered level up to the next offered one", () => {
+    expect(effort("z-ai/glm-5.3-flash(medium)")).toBe("high");
+    expect(effort("zai-org/GLM-5.2(low)")).toBe("high");
+  });
+  it("caps at the highest offered level", () => {
+    expect(effort("meta/muse-spark-1.3-contributor(max)")).toBe("xhigh");
+  });
+  it("maps minimal → low and ultra → max", () => {
+    expect(effort("z-ai/glm-5.3-flash(minimal)")).toBe("low");
+    expect(effort("z-ai/glm-5.3-flash(ultra)")).toBe("max");
+  });
+  it("omits the field for auto (upstream default)", () => {
+    expect(effort("z-ai/glm-5.3-flash(auto)")).toBeUndefined();
+  });
+  it("only ever emits wire enum values", () => {
+    const models = ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4-pro", "meta/muse-spark-1.3-contributor", "xiaomi/mimo-v2.6-pro"];
+    const levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "8192"];
+    for (const m of models) {
+      for (const l of levels) {
+        const e = effort(`${m}(${l})`);
+        if (e !== undefined) expect(WIRE, `${m}(${l}) → ${e}`).toContain(e);
+      }
+    }
+  });
+  it("exposes the per-model levels to the picker", () => {
+    expect(getThinkingLevels("commandcode", "z-ai/glm-5.3-flash")).toEqual(["low", "high", "max"]);
+    expect(getThinkingLevels("commandcode", "deepseek/deepseek-v4-pro")).toEqual(["none", "high", "max"]);
   });
 });
 
