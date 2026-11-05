@@ -1,6 +1,13 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to AI coding agents when working with code in this repository.
+
+## Fork & branch naming
+
+This repo is Lorne's personal fork (`origin` = `lorne-luo/9router`) of upstream `decolua/9router` (remote `fork`).
+
+- Personal branches are named `{upstream version}-lorne`, where the version is the upstream release the branch is based on, e.g. `v0.5.59-lorne`, `v0.5.112-lorne`.
+- Only push to Lorne's own GitHub remote (`origin`). Never push to the upstream remote (`fork`).
 
 ## What this is
 
