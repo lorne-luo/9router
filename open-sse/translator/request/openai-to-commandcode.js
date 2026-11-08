@@ -16,6 +16,7 @@ import { ROLE, OPENAI_BLOCK, CLAUDE_BLOCK } from "../schema/index.js";
 import { COMMAND_CODE_WORKING_DIR, toCommandCodeSessionUuid } from "../../shared/commandCodeHeaders.js";
 import { DEFAULT_MAX_TOKENS } from "../../config/runtimeConfig.js";
 import { parseDataUri, encodeDataUri } from "../concerns/image.js";
+import { stripThinkingSuffix } from "../concerns/thinkingUnified.js";
 
 function flattenText(content) {
   if (content == null) return "";
@@ -212,7 +213,9 @@ function convertTools(tools) {
 export function openaiToCommandCodeRequest(model, body, stream, credentials) {
   const { messages, system } = convertMessages(body.messages);
   const params = {
-    model,
+    // Upstream reads only params.model; chatCore strips the "(level)" suffix
+    // from the top-level body.model, so consume it here (as Kiro does).
+    model: stripThinkingSuffix(model),
     messages,
     stream: stream !== false,
     max_tokens: body.max_tokens ?? body.max_output_tokens ?? COMMAND_CODE_MAX_TOKENS,

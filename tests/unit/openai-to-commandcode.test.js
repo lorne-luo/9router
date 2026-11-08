@@ -10,6 +10,8 @@
 
 import { describe, it, expect } from "vitest";
 import { openaiToCommandCodeRequest } from "../../open-sse/translator/request/openai-to-commandcode.js";
+import { translateRequest } from "../../open-sse/translator/index.js";
+import { FORMATS } from "../../open-sse/translator/formats.js";
 
 const MODEL = "moonshotai/Kimi-K2.6";
 
@@ -355,5 +357,28 @@ describe("openaiToCommandCodeRequest — native image blocks", () => {
       .filter((b) => b.type === "text")
       .map((b) => b.text);
     expect(texts).not.toContain("[image omitted]");
+  });
+});
+
+// Upstream reads the model only from params.model; chatCore strips the
+// "model(level)" suffix from the top-level body.model alone, so a leaked
+// suffix is rejected: "Model/provider not recognized: anthropic:<model>(max)".
+describe("openaiToCommandCodeRequest — thinking suffix", () => {
+  const HI = { messages: [{ role: "user", content: "hi" }] };
+
+  it("strips the (level) suffix from params.model", () => {
+    const out = openaiToCommandCodeRequest("z-ai/glm-5.3-flash(max)", HI, true);
+    expect(out.params.model).toBe("z-ai/glm-5.3-flash");
+  });
+
+  it("keeps a suffix-free model unchanged", () => {
+    const out = openaiToCommandCodeRequest("z-ai/glm-5.3-flash", HI, true);
+    expect(out.params.model).toBe("z-ai/glm-5.3-flash");
+  });
+
+  it("still maps the suffix to params.reasoning_effort via translateRequest", () => {
+    const out = translateRequest(FORMATS.OPENAI, FORMATS.COMMANDCODE, "z-ai/glm-5.3-flash(max)", HI, true, null, "commandcode");
+    expect(out.params.model).toBe("z-ai/glm-5.3-flash");
+    expect(out.params.reasoning_effort).toBe("max");
   });
 });
