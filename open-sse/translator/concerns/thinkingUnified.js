@@ -427,13 +427,11 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels, display, model = "",
     case "commandcode": {
       // Native CLI sends reasoning_effort inside params of the /alpha/generate envelope.
       if (!body.params || typeof body.params !== "object") body.params = {};
-      if (none && canDisable) {
-        delete body.params.reasoning_effort;
-        break;
-      }
-      const rawLevel = toLevel(eff);
+      // "off" switches thinking off; deleting the field would leave the upstream default.
+      const rawLevel = none && canDisable ? "off" : toLevel(eff);
       const level = rawLevel === "auto" ? "high"
         : rawLevel === "minimal" ? "low"
+        : rawLevel === "ultra" ? "max"
         : rawLevel;
       const validLevels = ["off", "low", "medium", "high", "xhigh", "max"];
       if (level && validLevels.includes(level)) {

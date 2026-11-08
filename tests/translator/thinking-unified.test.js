@@ -275,6 +275,40 @@ describe("applyThinking per provider format", () => {
   });
 });
 
+// /alpha/generate validates params.reasoning_effort against
+// off|low|medium|high|xhigh|max (probed live: "none"/"minimal"/"auto" → 400).
+describe("applyThinking — commandcode effort mapping", () => {
+  const WIRE = ["off", "low", "medium", "high", "xhigh", "max"];
+  const effort = (model) =>
+    apply("commandcode", model, { params: { messages: [] } }, "commandcode").params.reasoning_effort;
+
+  it("maps none → off instead of dropping the field", () => {
+    expect(effort("deepseek/deepseek-v4.1-flash(none)")).toBe("off");
+  });
+  it("maps minimal → low and ultra → max", () => {
+    expect(effort("z-ai/glm-5.3-flash(minimal)")).toBe("low");
+    expect(effort("z-ai/glm-5.3-flash(ultra)")).toBe("max");
+  });
+  it("maps auto → high", () => {
+    expect(effort("z-ai/glm-5.3-flash(auto)")).toBe("high");
+  });
+  it("forwards wire levels unchanged", () => {
+    for (const l of ["low", "medium", "high", "xhigh", "max"]) {
+      expect(effort(`z-ai/glm-5.3-flash(${l})`)).toBe(l);
+    }
+  });
+  it("only ever emits wire enum values", () => {
+    const models = ["z-ai/glm-5.3-flash", "deepseek/deepseek-v4-pro", "xiaomi/mimo-v2.6-pro"];
+    const levels = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "auto", "8192"];
+    for (const m of models) {
+      for (const l of levels) {
+        const e = effort(`${m}(${l})`);
+        if (e !== undefined) expect(WIRE, `${m}(${l}) → ${e}`).toContain(e);
+      }
+    }
+  });
+});
+
 describe("extractReasoningText (response shapes)", () => {
   it("reasoning_content (GLM/Qwen/DeepSeek)", () => {
     expect(extractReasoningText({ reasoning_content: "abc" })).toBe("abc");
