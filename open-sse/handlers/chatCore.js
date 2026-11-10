@@ -217,6 +217,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     translatedBody = translateRequest(sourceFormat, targetFormat, upstreamModel, body, stream, credentials, provider, reqLogger, stripList, connectionId, clientTool);
     if (!translatedBody) {
       trackPendingRequest(model, provider, connectionId, false, true);
+      appendRequestLog({ model, provider, connectionId, status: `FAILED ${HTTP_STATUS.BAD_REQUEST}` }).catch(() => { });
       return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Failed to translate request for ${sourceFormat} → ${targetFormat}`);
     }
     toolNameMap = translatedBody._toolNameMap;

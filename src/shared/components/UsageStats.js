@@ -2,21 +2,12 @@
 
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { FREE_PROVIDERS, AI_PROVIDERS } from "@/shared/constants/providers";
-
-// Keep providers without serviceKinds (default LLM) or with "llm" in serviceKinds
-function isLLMProvider(id) {
-  const p = AI_PROVIDERS[id];
-  if (!p?.serviceKinds) return true;
-  return p.serviceKinds.includes("llm");
-}
 import Badge from "./Badge";
 import Card from "./Card";
 import OverviewCards from "@/app/(dashboard)/dashboard/usage/components/OverviewCards";
 import UsageTable, { fmt, fmtTime } from "@/app/(dashboard)/dashboard/usage/components/UsageTable";
 import dynamic from "next/dynamic";
-// Lazy-load: keeps @xyflow/react and recharts out of the initial bundle
-const ProviderTopology = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderTopology"), { ssr: false });
+// Lazy-load: keeps recharts out of the initial bundle
 const UsageChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/UsageChart"), { ssr: false });
 const ProviderBarChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/ProviderBarChart"), { ssr: false });
 const TopModelsChart = dynamic(() => import("@/app/(dashboard)/dashboard/usage/components/TopModelsChart"), { ssr: false });
@@ -42,41 +33,61 @@ function TimeAgo({ timestamp }) {
 }
 
 function RecentRequests({ requests = [] }) {
+  const failed = requests.filter((r) => r.status === "error").length;
   return (
-    <Card className="flex min-w-0 flex-col overflow-hidden" padding="sm" style={{ height: 480 }}>
+    <Card className="flex min-w-0 flex-col overflow-hidden" padding="sm" style={{ height: 560 }}>
       {/* Header */}
-      <div className="px-1 py-2 border-b border-border shrink-0">
+      <div className="flex items-center justify-between px-1 py-2 border-b border-border shrink-0">
         <span className="text-xs font-semibold text-text-muted uppercase tracking-wide">Recent Requests</span>
+        {requests.length > 0 && (
+          <span className="text-xs text-text-muted">
+            {requests.length} shown{failed > 0 && <span className="text-error"> · {failed} failed</span>}
+          </span>
+        )}
       </div>
 
       {!requests.length ? (
         <div className="flex-1 flex items-center justify-center text-text-muted text-sm">No requests yet.</div>
       ) : (
-        <div className="flex-1 overflow-y-auto">
-          <table className="w-full min-w-[300px] border-collapse text-xs">
+        <div className="flex-1 overflow-auto">
+          <table className="w-full min-w-[640px] border-collapse text-xs">
             <thead className="sticky top-0 bg-bg z-10">
               <tr className="border-b border-border">
-                <th className="py-1.5 text-left font-semibold text-text-muted w-2"></th>
-                <th className="py-1.5 text-left font-semibold text-text-muted">Model</th>
-                <th className="py-1.5 text-right font-semibold text-text-muted whitespace-nowrap">In / Out</th>
-                <th className="py-1.5 text-right font-semibold text-text-muted">When</th>
+                <th className="py-1.5 px-2 text-left font-semibold text-text-muted">Status</th>
+                <th className="py-1.5 px-2 text-left font-semibold text-text-muted">Provider</th>
+                <th className="py-1.5 px-2 text-left font-semibold text-text-muted">Model</th>
+                <th className="py-1.5 px-2 text-right font-semibold text-text-muted">Input</th>
+                <th className="py-1.5 px-2 text-right font-semibold text-text-muted">Output</th>
+                <th className="py-1.5 px-2 text-right font-semibold text-text-muted">Cached</th>
+                <th className="py-1.5 px-2 text-right font-semibold text-text-muted">When</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border/50">
               {requests.map((r, i) => {
-                const ok = !r.status || r.status === "ok" || r.status === "success";
+                const ok = r.status !== "error";
                 return (
-                  <tr key={i} className="hover:bg-bg-subtle transition-colors">
-                    <td className="py-1.5">
-                      <span className={`block w-1.5 h-1.5 rounded-full ${ok ? "bg-success" : "bg-error"}`} />
+                  <tr key={`${r.timestamp}-${i}`} className={`transition-colors hover:bg-bg-subtle ${ok ? "" : "bg-red-500/5"}`}>
+                    <td className="py-1.5 px-2 whitespace-nowrap">
+                      <Badge variant={ok ? "success" : "error"} size="sm" dot>
+                        {ok ? "OK" : r.statusCode || "ERR"}
+                      </Badge>
                     </td>
-                    <td className="py-1.5 font-mono truncate max-w-[120px]" title={r.model}>{r.model}</td>
-                    <td className="py-1.5 text-right whitespace-nowrap">
-                      <span className="text-primary">{fmt(r.promptTokens)}↑</span>
-                      {" "}
-                      <span className="text-success">{fmt(r.completionTokens)}↓</span>
+                    <td className="py-1.5 px-2 whitespace-nowrap">
+                      <Badge variant="default" size="sm">{r.provider || "-"}</Badge>
                     </td>
-                    <td className="py-1.5 text-right text-text-muted whitespace-nowrap"><TimeAgo timestamp={r.timestamp} /></td>
+                    <td className="py-1.5 px-2 font-mono truncate max-w-[320px]" title={r.model}>{r.model}</td>
+                    {ok ? (
+                      <>
+                        <td className="py-1.5 px-2 text-right whitespace-nowrap text-primary">{fmt(r.promptTokens)}</td>
+                        <td className="py-1.5 px-2 text-right whitespace-nowrap text-success">{fmt(r.completionTokens)}</td>
+                        <td className="py-1.5 px-2 text-right whitespace-nowrap text-text-muted">{r.cachedTokens ? fmt(r.cachedTokens) : "-"}</td>
+                      </>
+                    ) : (
+                      <td colSpan={3} className="py-1.5 px-2 text-right text-text-muted">-</td>
+                    )}
+                    <td className="py-1.5 px-2 text-right text-text-muted whitespace-nowrap" title={new Date(r.timestamp).toLocaleString()}>
+                      <TimeAgo timestamp={r.timestamp} />
+                    </td>
                   </tr>
                 );
               })}
@@ -215,45 +226,11 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   const [fetching, setFetching] = useState(false);
   const [tableView, setTableView] = useState("model");
   const [viewMode, setViewMode] = useState("costs");
-  const [providers, setProviders] = useState([]);
   const [periodLocal, setPeriodLocal] = useState("today");
   const isInitialLoad = useRef(true);
   const hasLoadedStats = useRef(false);
   const period = periodProp ?? periodLocal;
   const setPeriod = setPeriodProp ?? setPeriodLocal;
-
-  // Fetch connected providers once, deduplicate by provider type
-  // Always include noAuth free providers (e.g. opencode) regardless of connections
-  useEffect(() => {
-    Promise.all([
-      fetch("/api/providers").then((r) => r.ok ? r.json() : null),
-      fetch("/api/provider-nodes").then((r) => r.ok ? r.json() : null),
-    ])
-      .then(([d, nodesData]) => {
-        // Build node name lookup for custom providers
-        const nodeNameMap = {};
-        for (const node of (nodesData?.nodes || [])) {
-          nodeNameMap[node.id] = node.name;
-        }
-        const seen = new Set();
-        const unique = (d?.connections || []).filter((c) => {
-          if (c.isActive === false) return false;
-          if (!isLLMProvider(c.provider)) return false;
-          if (AI_PROVIDERS[c.provider]?.hidden) return false;
-          if (seen.has(c.provider)) return false;
-          seen.add(c.provider);
-          return true;
-        }).map((c) => ({
-          ...c,
-          nodeName: nodeNameMap[c.provider] || null,
-        }));
-        const noAuthProviders = Object.values(FREE_PROVIDERS)
-          .filter((p) => p.noAuth && !p.hidden && !seen.has(p.id) && isLLMProvider(p.id))
-          .map((p) => ({ provider: p.id, name: p.name }));
-        setProviders([...unique, ...noAuthProviders]);
-      })
-      .catch(() => {});
-  }, []);
 
   // Fetch filtered stats via REST when period changes
   useEffect(() => {
@@ -280,7 +257,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       });
   }, [period]);
 
-  // SSE connection - real-time updates for activeRequests + recentRequests only
+  // SSE connection - real-time updates for recentRequests + pending only
   useEffect(() => {
     const es = new EventSource("/api/usage/stream");
 
@@ -292,9 +269,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
           if (!prev) return prev;
           return {
             ...prev,
-            activeRequests: data.activeRequests,
             recentRequests: data.recentRequests,
-            errorProvider: data.errorProvider,
             pending: data.pending,
           };
         });
@@ -471,18 +446,8 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       {/* Overview cards */}
       {loading ? spinner : <OverviewCards stats={stats} />}
 
-      {/* Provider topology + Recent Requests */}
-      {loading ? spinner : (
-        <div className="grid min-w-0 grid-cols-1 items-stretch gap-2 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-          <ProviderTopology
-            providers={providers}
-            activeRequests={stats.activeRequests || []}
-            lastProvider={stats.recentRequests?.[0]?.provider || ""}
-            errorProvider={stats.errorProvider || ""}
-          />
-          <RecentRequests requests={stats.recentRequests || []} />
-        </div>
-      )}
+      {/* Recent Requests */}
+      {loading ? spinner : <RecentRequests requests={stats.recentRequests || []} />}
 
       {/* Token / Cost chart - sync period */}
       {loading ? spinner : <UsageChart period={period} />}
