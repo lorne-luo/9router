@@ -12,7 +12,8 @@ function maskApiKey(key) {
 }
 
 const PENDING_TIMEOUT_MS = 60 * 1000;
-const RING_CAP = 50;
+const RING_CAP = 200;
+const RECENT_LIMIT = 100;
 const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
 
@@ -24,8 +25,9 @@ if (!global._statsEmitter) {
   global._statsEmitter.setMaxListeners(50);
 }
 if (!global._pendingTimers) global._pendingTimers = {};
-if (!global._recentRing) global._recentRing = { items: [], initialized: false };
+if (!global._recentRing) global._recentRing = { items: [], initPromise: null };
 if (!global._connectionMapCache) global._connectionMapCache = { map: {}, ts: 0 };
+if (!global._providerNodeNameCache) global._providerNodeNameCache = { map: {}, ts: 0 };
 if (!global._statsEmitTimers) global._statsEmitTimers = { pending: null, update: null };
 
 const pendingRequests = global._pendingRequests;
@@ -33,6 +35,7 @@ const lastErrorProvider = global._lastErrorProvider;
 const pendingTimers = global._pendingTimers;
 const recentRing = global._recentRing;
 const connCache = global._connectionMapCache;
+const nodeNameCache = global._providerNodeNameCache;
 const statsEmitTimers = global._statsEmitTimers;
 
 export const statsEmitter = global._statsEmitter;
@@ -119,18 +122,86 @@ async function getConnectionMapCached() {
   return connCache.map;
 }
 
-async function ensureRingInitialized() {
-  if (recentRing.initialized) return;
-  recentRing.initialized = true;
+// Custom compatible providers are stored by node id (e.g. anthropic-compatible-<uuid>).
+async function getProviderNodeNameMapCached() {
+  if (Date.now() - nodeNameCache.ts < CONN_CACHE_TTL_MS) return nodeNameCache.map;
+  try {
+    const { getProviderNodes } = await import("./nodesRepo.js");
+    const map = {};
+    for (const n of await getProviderNodes()) if (n.id && n.name) map[n.id] = n.name;
+    nodeNameCache.map = map;
+    nodeNameCache.ts = Date.now();
+  } catch {}
+  return nodeNameCache.map;
+}
+
+// Memoized so concurrent callers wait for the load instead of racing it.
+function ensureRingInitialized() {
+  if (!recentRing.initPromise) recentRing.initPromise = loadRing();
+  return recentRing.initPromise;
+}
+
+async function loadRing() {
+  let items = [];
   try {
     const db = await getAdapter();
-    const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ORDER BY id DESC LIMIT ?`, [RING_CAP]);
-    recentRing.items = rows.reverse().map((r) => ({
+    const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens, meta FROM usageHistory ORDER BY id DESC LIMIT ?`, [RING_CAP]);
+    items = rows.map((r) => ({
       timestamp: r.timestamp, provider: r.provider, model: r.model, connectionId: r.connectionId,
       apiKey: r.apiKey, endpoint: r.endpoint, cost: r.cost, status: r.status,
-      tokens: parseJson(r.tokens, {}),
+      tokens: parseJson(r.tokens, {}), comboName: parseJson(r.meta, {})?.comboName,
     }));
   } catch {}
+  // Failed requests never reach usageHistory; requestDetails keeps them when observability is on.
+  try {
+    const db = await getAdapter();
+    const rows = db.all(`SELECT timestamp, provider, model, connectionId, data FROM requestDetails WHERE status = 'error' ORDER BY timestamp DESC LIMIT ?`, [RING_CAP]);
+    for (const r of rows) {
+      const data = parseJson(r.data, {}) || {};
+      items.push({
+        timestamp: r.timestamp, provider: r.provider, model: r.model, connectionId: r.connectionId,
+        status: "error", statusCode: data.response?.status || null, tokens: {},
+        comboName: data.comboName,
+      });
+    }
+  } catch {}
+  // Keep anything pushed while loading (saveRequestUsage pushes without awaiting init).
+  const ringKey = (e) => `${e.timestamp}|${e.provider}|${e.model}|${e.status || "ok"}`;
+  const loaded = new Set(items.map(ringKey));
+  const pushed = recentRing.items.filter((e) => !loaded.has(ringKey(e)));
+  recentRing.items = [...items, ...pushed]
+    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+    .slice(-RING_CAP);
+}
+
+function buildRecentRequests(nodeNames = {}) {
+  const seen = new Set();
+  return [...recentRing.items]
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+    .map((e) => {
+      const t = e.tokens || {};
+      return {
+        timestamp: e.timestamp, model: e.model,
+        provider: nodeNames[e.provider] || e.provider || "",
+        providerId: e.provider || "",
+        promptTokens: t.prompt_tokens || t.input_tokens || 0,
+        completionTokens: t.completion_tokens || t.output_tokens || 0,
+        cachedTokens: t.cached_tokens || t.cache_read_input_tokens || 0,
+        status: e.status || "ok",
+        statusCode: e.statusCode || null,
+        comboName: e.comboName || null,
+      };
+    })
+    .filter((e) => {
+      if (e.status === "error") return true;
+      if (e.promptTokens === 0 && e.completionTokens === 0) return false;
+      const minute = e.timestamp ? e.timestamp.slice(0, 16) : "";
+      const key = `${e.model}|${e.providerId}|${e.promptTokens}|${e.completionTokens}|${minute}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, RECENT_LIMIT);
 }
 
 async function calculateCost(provider, model, tokens) {
@@ -214,27 +285,7 @@ export async function getActiveRequests() {
   }
 
   await ensureRingInitialized();
-  const seen = new Set();
-  const recentRequests = [...recentRing.items]
-    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-    .map((e) => {
-      const t = e.tokens || {};
-      return {
-        timestamp: e.timestamp, model: e.model, provider: e.provider || "",
-        promptTokens: t.prompt_tokens || t.input_tokens || 0,
-        completionTokens: t.completion_tokens || t.output_tokens || 0,
-        status: e.status || "ok",
-      };
-    })
-    .filter((e) => {
-      if (e.promptTokens === 0 && e.completionTokens === 0) return false;
-      const minute = e.timestamp ? e.timestamp.slice(0, 16) : "";
-      const key = `${e.model}|${e.provider}|${e.promptTokens}|${e.completionTokens}|${minute}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 20);
+  const recentRequests = buildRecentRequests(await getProviderNodeNameMapCached());
 
   const errorProvider = (Date.now() - lastErrorProvider.ts < 10000) ? lastErrorProvider.provider : "";
   return { activeRequests, recentRequests, errorProvider };
@@ -286,7 +337,7 @@ export async function saveRequestUsage(entry) {
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({}),
+          stringifyJson(tokens), stringifyJson(entry.comboName ? { comboName: entry.comboName } : {}),
         ]
       );
 
@@ -372,29 +423,8 @@ export async function getUsageStats(period = "all") {
     if (k.key) apiKeyMap[k.key.trim()] = { name: k.name, id: k.id, createdAt: k.createdAt };
   }
 
-  // recentRequests from live history (last 100 entries enough for 20 deduped)
-  const recentRows = db.all(`SELECT timestamp, provider, model, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
-  const seen = new Set();
-  const recentRequests = recentRows
-    .map((r) => {
-      const t = parseJson(r.tokens, {}) || {};
-      return {
-        timestamp: r.timestamp, model: r.model, provider: r.provider || "",
-        promptTokens: t.prompt_tokens || t.input_tokens || 0,
-        completionTokens: t.completion_tokens || t.output_tokens || 0,
-        cachedTokens: t.cached_tokens || t.cache_read_input_tokens || 0,
-        status: r.status || "ok",
-      };
-    })
-    .filter((e) => {
-      if (e.promptTokens === 0 && e.completionTokens === 0) return false;
-      const minute = e.timestamp ? e.timestamp.slice(0, 16) : "";
-      const key = `${e.model}|${e.provider}|${e.promptTokens}|${e.completionTokens}|${minute}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, 20);
+  await ensureRingInitialized();
+  const recentRequests = buildRecentRequests(providerNodeNameMap);
 
   const stats = {
     totalRequests: 0,
@@ -780,7 +810,17 @@ function formatLogDate(date = new Date()) {
 }
 
 // No-op: request log is now derived from usageHistory table on read.
-export async function appendRequestLog() {}
+// Only failures are recorded: successes reach the recent ring via saveRequestUsage.
+export async function appendRequestLog({ model, provider, connectionId, status, comboName } = {}) {
+  const match = typeof status === "string" && status.match(/^FAILED (\d+)/);
+  if (!match) return;
+  await ensureRingInitialized();
+  pushToRing({
+    timestamp: new Date().toISOString(), provider, model, connectionId,
+    status: "error", statusCode: Number(match[1]), tokens: {}, comboName,
+  });
+  scheduleStatsEvent("pending");
+}
 
 export async function getRecentLogs(limit = 200) {
   try {
