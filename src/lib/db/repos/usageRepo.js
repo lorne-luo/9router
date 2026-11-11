@@ -145,11 +145,11 @@ async function loadRing() {
   let items = [];
   try {
     const db = await getAdapter();
-    const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens FROM usageHistory ORDER BY id DESC LIMIT ?`, [RING_CAP]);
+    const rows = db.all(`SELECT timestamp, provider, model, connectionId, apiKey, endpoint, cost, status, tokens, meta FROM usageHistory ORDER BY id DESC LIMIT ?`, [RING_CAP]);
     items = rows.map((r) => ({
       timestamp: r.timestamp, provider: r.provider, model: r.model, connectionId: r.connectionId,
       apiKey: r.apiKey, endpoint: r.endpoint, cost: r.cost, status: r.status,
-      tokens: parseJson(r.tokens, {}),
+      tokens: parseJson(r.tokens, {}), comboName: parseJson(r.meta, {})?.comboName,
     }));
   } catch {}
   // Failed requests never reach usageHistory; requestDetails keeps them when observability is on.
@@ -161,6 +161,7 @@ async function loadRing() {
       items.push({
         timestamp: r.timestamp, provider: r.provider, model: r.model, connectionId: r.connectionId,
         status: "error", statusCode: data.response?.status || null, tokens: {},
+        comboName: data.comboName,
       });
     }
   } catch {}
@@ -188,6 +189,7 @@ function buildRecentRequests(nodeNames = {}) {
         cachedTokens: t.cached_tokens || t.cache_read_input_tokens || 0,
         status: e.status || "ok",
         statusCode: e.statusCode || null,
+        comboName: e.comboName || null,
       };
     })
     .filter((e) => {
@@ -335,7 +337,7 @@ export async function saveRequestUsage(entry) {
           entry.timestamp, entry.provider || null, entry.model || null,
           entry.connectionId || null, entry.apiKey || null, entry.endpoint || null,
           promptTokens, completionTokens, entry.cost || 0, entry.status || "ok",
-          stringifyJson(tokens), stringifyJson({}),
+          stringifyJson(tokens), stringifyJson(entry.comboName ? { comboName: entry.comboName } : {}),
         ]
       );
 
@@ -809,13 +811,13 @@ function formatLogDate(date = new Date()) {
 
 // No-op: request log is now derived from usageHistory table on read.
 // Only failures are recorded: successes reach the recent ring via saveRequestUsage.
-export async function appendRequestLog({ model, provider, connectionId, status } = {}) {
+export async function appendRequestLog({ model, provider, connectionId, status, comboName } = {}) {
   const match = typeof status === "string" && status.match(/^FAILED (\d+)/);
   if (!match) return;
   await ensureRingInitialized();
   pushToRing({
     timestamp: new Date().toISOString(), provider, model, connectionId,
-    status: "error", statusCode: Number(match[1]), tokens: {},
+    status: "error", statusCode: Number(match[1]), tokens: {}, comboName,
   });
   scheduleStatsEvent("pending");
 }

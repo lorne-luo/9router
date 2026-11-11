@@ -50,10 +50,11 @@ function RecentRequests({ requests = [] }) {
         <div className="flex-1 flex items-center justify-center text-text-muted text-sm">No requests yet.</div>
       ) : (
         <div className="flex-1 overflow-auto">
-          <table className="w-full min-w-[640px] border-collapse text-xs">
+          <table className="w-full min-w-[720px] border-collapse text-xs">
             <thead className="sticky top-0 bg-bg z-10">
               <tr className="border-b border-border">
                 <th className="py-1.5 px-2 text-left font-semibold text-text-muted">Status</th>
+                <th className="py-1.5 px-2 text-left font-semibold text-text-muted">Combo</th>
                 <th className="py-1.5 px-2 text-left font-semibold text-text-muted">Provider</th>
                 <th className="py-1.5 px-2 text-left font-semibold text-text-muted">Model</th>
                 <th className="py-1.5 px-2 text-right font-semibold text-text-muted">Input</th>
@@ -71,6 +72,9 @@ function RecentRequests({ requests = [] }) {
                       <Badge variant={ok ? "success" : "error"} size="sm" dot>
                         {ok ? "OK" : r.statusCode || "ERR"}
                       </Badge>
+                    </td>
+                    <td className="py-1.5 px-2 whitespace-nowrap">
+                      {r.comboName ? <Badge variant="primary" size="sm">{r.comboName}</Badge> : <span className="text-text-muted">-</span>}
                     </td>
                     <td className="py-1.5 px-2 whitespace-nowrap">
                       <span title={r.providerId}>

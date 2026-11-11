@@ -97,6 +97,23 @@ describe("recent requests", () => {
     expect(stats.recentRequests.find((r) => r.model === "gpt-1").provider).toBe("My Claude Relay");
   });
 
+  it("keeps the combo name for successes and failures, also after a restart", async () => {
+    let repo = await loadRepo();
+    await repo.saveRequestUsage({ ...okEntry(1), comboName: "Main" });
+    await repo.saveRequestUsage(okEntry(2));
+    await repo.appendRequestLog({ model: "m", provider: "p", status: "FAILED 500", comboName: "Main" });
+
+    const live = Object.fromEntries((await repo.getActiveRequests()).recentRequests.map((r) => [r.model, r.comboName]));
+    expect(live).toEqual({ "gpt-1": "Main", "gpt-2": null, m: "Main" });
+
+    // Restart: the ring reloads successes from usageHistory.meta.
+    delete global._recentRing;
+    vi.resetModules();
+    repo = await loadRepo();
+    const reloaded = (await repo.getActiveRequests()).recentRequests.find((r) => r.model === "gpt-1");
+    expect(reloaded.comboName).toBe("Main");
+  });
+
   it("restores failures from requestDetails after restart", async () => {
     const repo = await loadRepo();
     const { getAdapter } = await import("@/lib/db/driver.js");
@@ -104,11 +121,11 @@ describe("recent requests", () => {
     const ts = new Date().toISOString();
     db.run(
       `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?)`,
-      ["d1", ts, "kiro", "kiro-model", null, "error", JSON.stringify({ response: { status: 503 } })],
+      ["d1", ts, "kiro", "kiro-model", null, "error", JSON.stringify({ response: { status: 503 }, comboName: "Main" })],
     );
 
     const { recentRequests } = await repo.getActiveRequests();
     expect(recentRequests).toHaveLength(1);
-    expect(recentRequests[0]).toMatchObject({ provider: "kiro", model: "kiro-model", status: "error", statusCode: 503 });
+    expect(recentRequests[0]).toMatchObject({ provider: "kiro", model: "kiro-model", status: "error", statusCode: 503, comboName: "Main" });
   });
 });
