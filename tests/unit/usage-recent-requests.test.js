@@ -17,6 +17,7 @@ beforeEach(() => {
   process.env.DATA_DIR = tempDir;
   delete global._dbAdapter;
   delete global._recentRing;
+  delete global._providerNodeNameCache;
   vi.resetModules();
 });
 
@@ -75,6 +76,25 @@ describe("recent requests", () => {
     const stats = await repo.getUsageStats();
     expect(stats.recentRequests.map((r) => r.status)).toEqual(["error", "ok"]);
     expect(stats.recentRequests[0]).toMatchObject({ provider: "gemini", statusCode: 502 });
+  });
+
+  it("shows the custom provider node name instead of its id", async () => {
+    const repo = await loadRepo();
+    const { createProviderNode } = await import("@/lib/db/repos/nodesRepo.js");
+    const nodeId = "anthropic-compatible-777d9098-6c36-4b6c-8dd1-5b8299271463";
+    await createProviderNode({ id: nodeId, type: "anthropic-compatible", name: "My Claude Relay", prefix: "relay" });
+    await repo.saveRequestUsage({ ...okEntry(1), provider: nodeId });
+    await repo.appendRequestLog({ model: "m", provider: nodeId, status: "FAILED 500" });
+    await repo.saveRequestUsage({ ...okEntry(2), provider: "openai" });
+
+    const { recentRequests } = await repo.getActiveRequests();
+    const byModel = Object.fromEntries(recentRequests.map((r) => [r.model, r]));
+    expect(byModel["gpt-1"]).toMatchObject({ provider: "My Claude Relay", providerId: nodeId });
+    expect(byModel.m).toMatchObject({ provider: "My Claude Relay", providerId: nodeId });
+    expect(byModel["gpt-2"]).toMatchObject({ provider: "openai", providerId: "openai" });
+
+    const stats = await repo.getUsageStats();
+    expect(stats.recentRequests.find((r) => r.model === "gpt-1").provider).toBe("My Claude Relay");
   });
 
   it("restores failures from requestDetails after restart", async () => {

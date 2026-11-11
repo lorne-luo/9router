@@ -27,6 +27,7 @@ if (!global._statsEmitter) {
 if (!global._pendingTimers) global._pendingTimers = {};
 if (!global._recentRing) global._recentRing = { items: [], initPromise: null };
 if (!global._connectionMapCache) global._connectionMapCache = { map: {}, ts: 0 };
+if (!global._providerNodeNameCache) global._providerNodeNameCache = { map: {}, ts: 0 };
 if (!global._statsEmitTimers) global._statsEmitTimers = { pending: null, update: null };
 
 const pendingRequests = global._pendingRequests;
@@ -34,6 +35,7 @@ const lastErrorProvider = global._lastErrorProvider;
 const pendingTimers = global._pendingTimers;
 const recentRing = global._recentRing;
 const connCache = global._connectionMapCache;
+const nodeNameCache = global._providerNodeNameCache;
 const statsEmitTimers = global._statsEmitTimers;
 
 export const statsEmitter = global._statsEmitter;
@@ -120,6 +122,19 @@ async function getConnectionMapCached() {
   return connCache.map;
 }
 
+// Custom compatible providers are stored by node id (e.g. anthropic-compatible-<uuid>).
+async function getProviderNodeNameMapCached() {
+  if (Date.now() - nodeNameCache.ts < CONN_CACHE_TTL_MS) return nodeNameCache.map;
+  try {
+    const { getProviderNodes } = await import("./nodesRepo.js");
+    const map = {};
+    for (const n of await getProviderNodes()) if (n.id && n.name) map[n.id] = n.name;
+    nodeNameCache.map = map;
+    nodeNameCache.ts = Date.now();
+  } catch {}
+  return nodeNameCache.map;
+}
+
 // Memoized so concurrent callers wait for the load instead of racing it.
 function ensureRingInitialized() {
   if (!recentRing.initPromise) recentRing.initPromise = loadRing();
@@ -158,14 +173,16 @@ async function loadRing() {
     .slice(-RING_CAP);
 }
 
-function buildRecentRequests() {
+function buildRecentRequests(nodeNames = {}) {
   const seen = new Set();
   return [...recentRing.items]
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
     .map((e) => {
       const t = e.tokens || {};
       return {
-        timestamp: e.timestamp, model: e.model, provider: e.provider || "",
+        timestamp: e.timestamp, model: e.model,
+        provider: nodeNames[e.provider] || e.provider || "",
+        providerId: e.provider || "",
         promptTokens: t.prompt_tokens || t.input_tokens || 0,
         completionTokens: t.completion_tokens || t.output_tokens || 0,
         cachedTokens: t.cached_tokens || t.cache_read_input_tokens || 0,
@@ -177,7 +194,7 @@ function buildRecentRequests() {
       if (e.status === "error") return true;
       if (e.promptTokens === 0 && e.completionTokens === 0) return false;
       const minute = e.timestamp ? e.timestamp.slice(0, 16) : "";
-      const key = `${e.model}|${e.provider}|${e.promptTokens}|${e.completionTokens}|${minute}`;
+      const key = `${e.model}|${e.providerId}|${e.promptTokens}|${e.completionTokens}|${minute}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -266,7 +283,7 @@ export async function getActiveRequests() {
   }
 
   await ensureRingInitialized();
-  const recentRequests = buildRecentRequests();
+  const recentRequests = buildRecentRequests(await getProviderNodeNameMapCached());
 
   const errorProvider = (Date.now() - lastErrorProvider.ts < 10000) ? lastErrorProvider.provider : "";
   return { activeRequests, recentRequests, errorProvider };
@@ -405,7 +422,7 @@ export async function getUsageStats(period = "all") {
   }
 
   await ensureRingInitialized();
-  const recentRequests = buildRecentRequests();
+  const recentRequests = buildRecentRequests(providerNodeNameMap);
 
   const stats = {
     totalRequests: 0,

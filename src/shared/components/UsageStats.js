@@ -73,7 +73,9 @@ function RecentRequests({ requests = [] }) {
                       </Badge>
                     </td>
                     <td className="py-1.5 px-2 whitespace-nowrap">
-                      <Badge variant="default" size="sm">{r.provider || "-"}</Badge>
+                      <span title={r.providerId}>
+                        <Badge variant="default" size="sm">{r.provider || "-"}</Badge>
+                      </span>
                     </td>
                     <td className="py-1.5 px-2 font-mono truncate max-w-[320px]" title={r.model}>{r.model}</td>
                     {ok ? (
